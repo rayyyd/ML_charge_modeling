@@ -76,7 +76,7 @@ model_params = {
     'rec': None,
     'dec': None,
     
-    'stochastic_level_dynamic': 1, # stochastic noise level dynamic.
+    'stochastic_level_dynamic': 10, # stochastic noise level dynamic.
 
     # training params
     # TODO: doesn't make too much sense for separate epochs per train and total epochs.
