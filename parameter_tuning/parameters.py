@@ -30,7 +30,7 @@ dataset = {
     # if both options are populated, random drops will be prioritised with drop_number.
     'missing_idx': None,
     'drop_number': 20,
-    'stochastic_level': 0.1, # stochastic noise level static.
+    'stochastic_level': 0.0, # stochastic noise level static.
     
 }
 
@@ -66,7 +66,7 @@ model_params = {
 
     'latent_dim': 16,
     #NOTE: reccomended to decrease this to 1e-5 or similar for training
-    'lr':5e-4,
+    'lr':5e-5,
     'n_batch': 16,  #batch size
     'beta': 1,
 
@@ -76,13 +76,13 @@ model_params = {
     'rec': None,
     'dec': None,
     
-    'stochastic_level_dynamic': 0.1, # stochastic noise level dynamic.
+    'stochastic_level_dynamic': 1, # stochastic noise level dynamic.
 
     # training params
     # TODO: doesn't make too much sense for separate epochs per train and total epochs.
     # NOTE: due a bug, total_epochs_Train must be greater than 14.
-    'total_epochs_train': 50,
-    'epochs_per_train': 10,
+    'total_epochs_train': 500,
+    'epochs_per_train': 100,
     'epochs': 0, # a record of the epochs
     'loss': [], # loss = KL_loss + MSE loss
     'loss_thresh': 0.00001,

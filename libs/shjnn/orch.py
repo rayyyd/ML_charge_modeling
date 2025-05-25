@@ -172,9 +172,9 @@ def load_state(path, dynamics_func, recognition_network, decoder, optimizer, los
     """
     # Load checkpoint, handling device appropriately
     if dev == 'cpu':
-        checkpoint = torch.load(path, map_location=torch.device('cpu'))
+        checkpoint = torch.load(path, map_location=torch.device('cpu'), weights_only=False)
     else:
-        checkpoint = torch.load(path)
+        checkpoint = torch.load(path, weights_only=False)
     
     # Load model state dictionaries
     dynamics_func.load_state_dict(checkpoint['func_state_dict'])
