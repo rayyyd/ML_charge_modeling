@@ -443,7 +443,7 @@ def sweep_latent_adaptive(model_params, dataset, latent_dim_number, specific_tra
     )
 
     # Get indices of all trajectories
-    if specific_traj_list is not None:
+    if specific_traj_list is None:
         sample_indices = list(range(len(trajectories)))
     else:
         sample_indices = specific_traj_list
