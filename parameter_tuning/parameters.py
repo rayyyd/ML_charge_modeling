@@ -52,7 +52,7 @@ model_params = {
     # hyper params
 
     #NOTE: reccomended to increase rnn_nhidden size.
-    'nhidden': 256,
+    'nhidden': 512,
     
     'rnn_linear1': 256,
     'rnn_linear2': 128,
@@ -61,14 +61,22 @@ model_params = {
     'rnn_linear5': 256,
     
     
-    'rnn_nhidden': 256,
+    'rnn_nhidden': 512,
     'obs_dim': 6,  # Changed from 1 to 6 to match input data dimensions
 
     'latent_dim': 16,
-    #NOTE: reccomended to decrease this to 1e-5 or similar for training
-    'lr':5e-5,
+        
+    'b_vae_adaptive': True,
+    
+    'lr':1e-3,
+    'lr_decay': 0.5,  # learning rate decay
+    'lr_min': 1e-6,
+    
+    'beta': 0.05,
+    'beta_gain': 2,  # beta gain for adaptive training
+    'beta_max': 4,  # maximum beta value
+    
     'n_batch': 16,  #batch size
-    'beta': 1,
 
     'optim': None,
     'device': None,
@@ -76,12 +84,12 @@ model_params = {
     'rec': None,
     'dec': None,
     
-    'stochastic_level_dynamic': 10, # stochastic noise level dynamic.
+    'stochastic_level_dynamic': 0, # stochastic noise level dynamic.
 
     # training params
     # TODO: doesn't make too much sense for separate epochs per train and total epochs.
     # NOTE: due a bug, total_epochs_Train must be greater than 14.
-    'total_epochs_train': 500,
+    'total_epochs_train': 1000,
     'epochs_per_train': 100,
     'epochs': 0, # a record of the epochs
     'loss': [], # loss = KL_loss + MSE loss
@@ -105,9 +113,11 @@ model_params = {
     #free to use memory for debugging only
     'debug': 1,
     'debug_list': [],
-    'debug_list2': []
+    'debug_list2': [],
     
-    
+    #adpative settings:
+    'lr_track': None,
+    'beta_track': None   
 }
 
 

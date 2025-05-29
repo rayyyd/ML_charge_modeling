@@ -148,7 +148,6 @@ class B_VAE:
         path = folder + f"/model/save_model_ckpt_{epoch}.pth"
         shjnn.save_state(path, func, rec, dec, optim, loss, epochs) 
         
-        loader.save_model_params(model_params)
         
     def load_model(self, model_params, path):
         shjnn.load_state(path, model_params['func'], model_params['rec'], dec = model_params['dec'], optim = model_params['optim'], loss = model_params['loss'], epochs = model_params['epochs'], dev = model_params['device'])
