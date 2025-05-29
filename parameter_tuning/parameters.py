@@ -64,13 +64,13 @@ model_params = {
     'rnn_nhidden': 512,
     'obs_dim': 6,  # Changed from 1 to 6 to match input data dimensions
 
-    'latent_dim': 16,
+    'latent_dim': 8,
         
     'b_vae_adaptive': True,
     
     'lr':1e-3,
     'lr_decay': 0.5,  # learning rate decay
-    'lr_min': 1e-6,
+    'lr_min': 1e-7,
     
     'beta': 0.05,
     'beta_gain': 2,  # beta gain for adaptive training
@@ -84,7 +84,7 @@ model_params = {
     'rec': None,
     'dec': None,
     
-    'stochastic_level_dynamic': 0, # stochastic noise level dynamic.
+    'stochastic_level_dynamic': 5, # stochastic noise level dynamic.
 
     # training params
     # TODO: doesn't make too much sense for separate epochs per train and total epochs.

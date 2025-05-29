@@ -24,7 +24,7 @@ import parameters
 import shjnn
 
 
-def plot_training_loss(model_params, save=False, split=False, plot_total=False, plot_MSE=True, plot_KL=True, scale='log'):
+def plot_training_loss(model_params, save=False, split=False, plot_total=False, plot_MSE=True, plot_KL=True, scale='linear'):
     """
     Plot training loss curves from model training history.
     
