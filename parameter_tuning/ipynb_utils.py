@@ -16,6 +16,8 @@ from b_vae import B_VAE
 from autoencoders import vae
 import matplotlib.colors as colors
 import matplotlib.cm as cmx
+from matplotlib.colors import LinearSegmentedColormap
+
 sys.path.append('../../libs/')
 import shjnn
 
@@ -46,6 +48,7 @@ def get_sweep_index(reference_index, sweep):
     else:
         raise ValueError("Invalid sweep type. Choose 'intensity', 'voltage', or 'delay'.")
     return output_list
+
 
 def get_latent_vectors(model_params, dataset, traj_idx=None):
     # Extract data from dataset
@@ -166,9 +169,6 @@ def sweep_latent_adaptive(model_params, dataset, latent_dim_number, latent_vecto
     latent_dims = model_params['latent_dim']
 
     # Create inference function for trajectory encoding
-    
-    print("Latent vectors shape:", latent_vectors.shape, 
-          "All timesteps shape:", all_latent_vectors.shape)
 
     # Set up figure for latent dimension sweep visualization
     num_dims = trajectories[0].shape[-1]
@@ -194,6 +194,8 @@ def sweep_latent_adaptive(model_params, dataset, latent_dim_number, latent_vecto
     color_map = cmx.ScalarMappable(norm=color_norm, cmap='cividis')
 
     # Test each value in the range
+    ref = None
+    mse_list = []
     for i, test_value in enumerate(test_values):
         # Get color for this test value
         color = color_map.to_rgba(i)
@@ -225,6 +227,12 @@ def sweep_latent_adaptive(model_params, dataset, latent_dim_number, latent_vecto
         )
         ax.plot(pred_times, pred_x_np[:, 0], '-', 
                label=label, alpha=0.6, color=color, linewidth=2)
+        
+        #calculate MSE against reference.
+        if ref is None:
+            ref = pred_x
+        else:
+            mse_list.append(torch.nn.MSELoss()(pred_x, ref).cpu().item())
             
     # Add labels and formatting
     plt.xlabel('Time [10$^{-7}$ + -log$_{10}(t)$ s]')
@@ -245,7 +253,8 @@ def sweep_latent_adaptive(model_params, dataset, latent_dim_number, latent_vecto
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         fig.savefig(save_dir + f'/epoch_{epoch_num}_dim_{latent_dim_number}.png', dpi=300)
-
+        
+    return sum(mse_list)
 
 def latent_trajectory(all_latent_vectors, sample_list=None, show=True, save=False, save_path=None):
     """
@@ -289,7 +298,12 @@ def latent_trajectory(all_latent_vectors, sample_list=None, show=True, save=Fals
     fig, ax = plt.subplots(figsize=(12, 8))
     
     # Create colormap for different latent dimensions
-    colors_list = plt.cm.tab20(np.linspace(0, 1, n_latent_dims))
+    # colors_list = plt.colours.tab20(np.linspace(0, 1, n_latent_dims))
+    
+    blue_red = LinearSegmentedColormap.from_list(
+        'blue_red', ['blue','red'], N=n_latent_dims
+    )
+    colors_list = [blue_red(i) for i in range(n_latent_dims)]
     
     # Plot each latent dimension
     for dim in range(n_latent_dims):
@@ -331,6 +345,146 @@ def latent_trajectory(all_latent_vectors, sample_list=None, show=True, save=Fals
     print(f"Plotted {n_latent_dims} latent dimensions over {n_timesteps} timesteps")
     if sample_list is not None:
         print(f"Used samples: {sample_list}")
+
+def run_and_save_inference_all_trajectories(model_params, dataset, save_dir=None, save_individual=True, save_batch=True):
+    """
+    Run and save inference for every trajectory in the dataset.
+    
+    Parameters
+    ----------
+    model_params : dict
+        Dictionary containing model parameters and components
+        Required keys: 'func', 'rec', 'dec', 'optim', 'device', 'epochs', 'folder'
+    dataset : dict
+        Dictionary containing dataset components
+        Required keys: 'trajs', 'times', 'y'
+    save_dir : str, optional
+        Directory to save results. If None, uses model_params['folder'] + '/inference_results'
+    save_individual : bool, default=True
+        Whether to save individual trajectory inference results
+    save_batch : bool, default=True
+        Whether to save batch inference results
+        
+    Returns
+    -------
+    dict
+        Dictionary containing inference results for all trajectories
+    """
+    # Extract data from dataset
+    trajectories = dataset['trajs']
+    time_points = dataset['times']
+    metadata = dataset['y']
+    
+    # Extract model components
+    model_func = model_params['func']
+    encoder = model_params['rec']
+    decoder = model_params['dec']
+    optimizer = model_params['optim']
+    device = model_params['device']
+    epoch_num = model_params['epochs']
+    
+    # Set up save directory
+    if save_dir is None:
+        save_dir = model_params['folder'] + '/inference_results'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        
+    # Create inference function
+    infer_step = shjnn.make_infer_step(
+        model_func, encoder, decoder, optimizer, device, 
+        input_mode='traj', sample=False
+    )
+    
+    # Create time points for prediction
+    pred_times = np.linspace(0, 2.5, 1000) + 1  # +1 accounts for time bias
+    time_tensor = torch.Tensor(pred_times).to(device)
+    
+    # Storage for results
+    all_predictions = []
+    all_latent_vectors = []
+    all_losses = []
+    trajectory_indices = list(range(len(trajectories)))
+    
+    print(f"Running inference on {len(trajectories)} trajectories...")
+    
+    # Process each trajectory
+    for idx in trajectory_indices:
+        # Prepare trajectory tensor
+        traj_tensor = trajectories[idx].view(1, *trajectories[idx].size()).to(device)
+        
+        # Run model inference for prediction
+        pred_x, pred_z = infer_step(traj_tensor, time_tensor)
+  
+        # Convert to numpy for storage
+        pred_x_np = pred_x.detach().cpu().numpy()[0]
+        pred_z_np = pred_z.detach().cpu().numpy()[0]
+        loss_value = loss.item()
+        
+        # Store results
+        all_predictions.append(pred_x_np)
+        all_latent_vectors.append(pred_z_np)
+        all_losses.append(loss_value)
+        
+        
+    
+    # Convert lists to numpy arrays
+    all_predictions = np.stack(all_predictions)
+    all_latent_vectors = np.stack(all_latent_vectors)
+    all_losses = np.array(all_losses)
+    
+    print(f"Inference complete. Shapes - Predictions: {all_predictions.shape}, Latent: {all_latent_vectors.shape}")
+    
+    return all_predictions
+    
+
+def get_mean_property_plot(model_params, dataset, show=True):
+    """
+    Get a mapping of mean property values for each sweep axis 'intensity', 'voltage', or 'delay' on 3 different plots.
+    """
+    val_map = {
+            # intensity in uJ
+            'intensity': {'source': 'int',
+                        'dark': 0., '32uJ': 32., '10uJ': 10., '3uJ': 3., '1uJ': 1., '03uJ': .3},
+            # voltage in V
+            'voltage': {'source': 'vlt',
+                        '05V': .5, '0V': 0., '15V': 1.5, '1V': 1., '2V': 2.},
+            # delay time in log10(s)
+            'delay': {'source': 'del',
+                    '100ns': 1e-7, '100us': 1e-4, '10ms': 1e-2, '10us': 1e-5, '1ms': 1e-3, '1us': 1e-6,
+                    '200ns': 2e-7, '200us': 2e-4, '20ms': 2e-2, '20us': 2e-5, '2ms': 2e-3, '2us': 2e-6,
+                    '500ns': 5e-7, '500us': 5e-4, '50ms': 5e-2, '50us': 5e-5, '5ms': 5e-3, '5us': 5e-6,
+                    },
+        }
+    
+    # Use run_and_save_inference_all_trajectories for comprehensive inference
+    all_predictions = run_and_save_inference_all_trajectories(model_params, dataset)
+    all_predictions = all_predictions.squeeze()
+    # for each value in one sweep axis, get the mean trajectory of all trajectories with that value in the sweep axis.
+    mean_map = {
+            # intensity in uJ
+            'intensity': {
+                        0: [], 32: [], 10: [], 3: [], 1: [], 0.3: []},
+            # voltage in V
+            'voltage': {'source': 'vlt',
+                        0.5: [], 0: [], 1.5: [], 1: [], 2: []},
+            # delay time in log10(s)
+            'delay': {'source': 'del',
+                    1e-7: [], 1e-4: [], 1e-2: [], 1e-5: [], 1e-3: [], 1e-6: [],
+                    2e-7: [], 2e-4: [], 2e-2: [], 2e-5: [], 2e-3: [], 2e-6: [],
+                    5e-7: [], 5e-4: [], 5e-2: [], 5e-5: [], 5e-3: [], 5e-6: []
+                    },
+        }
+    # append 
+    for i, meta in enumerate(dataset['y']):
+        meta_cpu = meta.cpu().item()
+        mean_map['intensity'][meta_cpu[0]].append(all_predictions[i])
+        mean_map['voltage'][meta_cpu[1]].append(all_predictions[i])
+        mean_map['delay'][meta_cpu[2]].append(all_predictions[i])
+    
+    # plot each.
+    
+        
+    
 
 if __name__ == "__main__":
     collapse_cells()
