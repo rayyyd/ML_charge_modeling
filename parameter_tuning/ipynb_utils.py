@@ -418,24 +418,22 @@ def run_and_save_inference_all_trajectories(model_params, dataset, save_dir=None
         # Convert to numpy for storage
         pred_x_np = pred_x.detach().cpu().numpy()[0]
         pred_z_np = pred_z.detach().cpu().numpy()[0]
-        loss_value = loss.item()
         
         # Store results
         all_predictions.append(pred_x_np)
         all_latent_vectors.append(pred_z_np)
-        all_losses.append(loss_value)
         
         
     
     # Convert lists to numpy arrays
     all_predictions = np.stack(all_predictions)
     all_latent_vectors = np.stack(all_latent_vectors)
-    all_losses = np.array(all_losses)
     
     print(f"Inference complete. Shapes - Predictions: {all_predictions.shape}, Latent: {all_latent_vectors.shape}")
     
     return all_predictions
     
+
 
 def get_mean_property_plot(model_params, dataset, show=True):
     """
@@ -456,33 +454,74 @@ def get_mean_property_plot(model_params, dataset, show=True):
                     },
         }
     
+    
     # Use run_and_save_inference_all_trajectories for comprehensive inference
     all_predictions = run_and_save_inference_all_trajectories(model_params, dataset)
+    
+    
     all_predictions = all_predictions.squeeze()
     # for each value in one sweep axis, get the mean trajectory of all trajectories with that value in the sweep axis.
     mean_map = {
-            # intensity in uJ
-            'intensity': {
-                        0: [], 32: [], 10: [], 3: [], 1: [], 0.3: []},
-            # voltage in V
-            'voltage': {'source': 'vlt',
-                        0.5: [], 0: [], 1.5: [], 1: [], 2: []},
-            # delay time in log10(s)
-            'delay': {'source': 'del',
-                    1e-7: [], 1e-4: [], 1e-2: [], 1e-5: [], 1e-3: [], 1e-6: [],
-                    2e-7: [], 2e-4: [], 2e-2: [], 2e-5: [], 2e-3: [], 2e-6: [],
-                    5e-7: [], 5e-4: [], 5e-2: [], 5e-5: [], 5e-3: [], 5e-6: []
-                    },
-        }
+    'intensity': {0:[], 0.3:[], 1:[], 3:[], 10:[], 32:[]},
+    'voltage':   {0:[], 0.5:[], 1:[], 1.5:[], 2:[]},
+    'delay':     {
+                    0.0000001:[],  # was 1e-7
+                    0.000001:[],   # was 1e-6
+                    0.00001:[],    # was 1e-5
+                    0.0001:[],     # was 1e-4
+                    0.001:[],      # was 1e-3
+                    0.01:[],       # was 1e-2
+                    0.02:[],       # was 2e-2
+                    0.05:[]       # was 5e-2
+                }
+    }
+    
     # append 
+    def canonical(x, ndp=7):
+        x = x.item()
+        return round(float(x), ndp)
+
     for i, meta in enumerate(dataset['y']):
-        meta_cpu = meta.cpu().item()
-        mean_map['intensity'][meta_cpu[0]].append(all_predictions[i])
-        mean_map['voltage'][meta_cpu[1]].append(all_predictions[i])
-        mean_map['delay'][meta_cpu[2]].append(all_predictions[i])
-    
+        meta_cpu = meta.detach().cpu().numpy()
+       
+        int_key   = canonical(meta_cpu[0])      # 0, 32, 10, …
+        volt_key  = canonical(meta_cpu[1])      # 0, 0.5, 1, …
+        delay_key = canonical(meta_cpu[2])      # 0.01, 1e-3, …
+
+        mean_map['intensity'][int_key].append(all_predictions[i])
+        mean_map['voltage'][volt_key].append(all_predictions[i])
+        try:
+            mean_map['delay'][delay_key].append(all_predictions[i])
+        except:
+            continue
+
     # plot each.
-    
+    cmap = plt.get_cmap('viridis')
+    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+    pred_times = np.linspace(0, 2.5, 1000) + 1  # +1 accounts for time bias
+    scale_factor = 50 * 1e2 / 1e3
+    for i, (key, value) in enumerate(mean_map.items()):
+        ax = axs[i]
+        n_groups = len(value)
+        colors = cmap(np.linspace(0, 1, n_groups))
+        for j, (sub_key, trajectories) in enumerate(value.items()):
+            if len(trajectories) > 0:
+                mean_trajectory = np.mean(trajectories, axis=0)
+                # print("trajectory: ", trajectories.shape)
+                # print(mean_trajectory.shape)
+                ax.plot(
+                    pred_times - 1,
+                    mean_trajectory / scale_factor,
+                    label=f"{sub_key} {val_map[key]['source']}",
+                    color=colors[j],        # explicit color
+                    linewidth=2,
+                    alpha=0.8
+                )
+        
+        ax.set_title(f"Mean Trajectories for {key.capitalize()}")
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Intensity")
+        ax.legend()
         
     
 
