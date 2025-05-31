@@ -24,7 +24,7 @@ import parameters
 import shjnn
 
 
-def plot_training_loss(model_params, save=False, split=False, plot_total=False, plot_MSE=True, plot_KL=True, scale='log'):
+def plot_training_loss(model_params, save=False, split=False, plot_total=False, plot_MSE=True, plot_KL=True, scale='linear'):
     """
     Plot training loss curves from model training history.
     
@@ -397,7 +397,7 @@ def sweep_latent_adaptives(model_params=parameters.model_params, dataset=paramet
         sweep_latent_adaptive(model_params, dataset, dim_idx, do_save, do_show)
 
 
-def sweep_latent_adaptive(model_params, dataset, latent_dim_number, save=False, show=False):
+def sweep_latent_adaptive(model_params, dataset, latent_dim_number, specific_traj_list=None, save=False, show=False):
     """
     Visualize the effect of varying a specific latent dimension.
     
@@ -443,7 +443,10 @@ def sweep_latent_adaptive(model_params, dataset, latent_dim_number, save=False, 
     )
 
     # Get indices of all trajectories
-    sample_indices = list(range(len(trajectories)))
+    if specific_traj_list is None:
+        sample_indices = list(range(len(trajectories)))
+    else:
+        sample_indices = specific_traj_list
 
     # Arrays to store latent vectors
     latent_vectors = []      # First timestep only
@@ -547,4 +550,253 @@ def sweep_latent_adaptive(model_params, dataset, latent_dim_number, save=False, 
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         fig.savefig(save_dir + f'/epoch_{epoch_num}_dim_{latent_dim_number}.png', dpi=300)
+
+
+def time_evolved_sweep(model_params, dataset, latent_dim_number, timesteps_interest, traj_idx=None, save=False, show=False):
+    """
+    Visualize the effect of varying a specific latent dimension over time.
     
+    This function generates predictions by varying the value of a single latent
+    dimension while keeping others fixed at their mean values. It shows how the
+    output evolves over time for different values of the latent dimension.
+    
+    Parameters
+    ----------
+    model_params : dict
+        Dictionary containing model parameters and components
+        Required keys: 'func', 'rec', 'dec', 'optim', 'device', 'epochs', 
+                        'latent_dim', 'folder'
+    dataset : dict
+        Dictionary containing dataset components
+        Required keys: 'trajs', 'times', 'y'
+    latent_dim_number : int
+        Index of the latent dimension to vary
+    timesteps_interest : list
+        List of timestep indices to visualize
+    traj_idx : list, optional
+        List of trajectory indices to use for encoding. If None, uses all trajectories
+    save : bool, default=False
+        Whether to save the plots to disk
+    show : bool, default=False
+        Whether to display the plots
+    
+    Returns
+    -------
+    None
+        The function creates and optionally saves plots but doesn't return any values
+    """
+    # Extract data from dataset
+    trajectories = dataset['trajs']
+    time_points = dataset['times']
+    metadata = dataset['y']
+
+    # Extract model components
+    model_func = model_params['func']
+    encoder = model_params['rec']
+    decoder = model_params['dec']
+    optimizer = model_params['optim']
+    device = model_params['device']
+    epoch_num = model_params['epochs']
+    latent_dims = model_params['latent_dim']
+
+    # Create inference function for trajectory encoding
+    infer_step_encode = shjnn.make_infer_step(
+        model_func, encoder, decoder, optimizer, device, 
+        input_mode='traj', sample=False
+    )
+
+    # Get indices of all trajectories
+    if traj_idx is None:
+        sample_indices = list(range(len(trajectories)))
+    else:
+        sample_indices = traj_idx
+        
+    # Arrays to store latent vectors
+    latent_vectors = []      # First timestep only
+    all_latent_vectors = []  # All timesteps
+    
+    # Process each trajectory to collect latent representations
+    for idx in sample_indices:
+        # Prepare trajectory tensor
+        traj_tensor = trajectories[idx].view(1, *trajectories[idx].size()).to(device)
+        
+        # Create time points tensor
+        pred_times = np.linspace(0, 2.5, 1000)
+        time_tensor = torch.Tensor(pred_times).to(device)
+
+        # Get model prediction and latent vectors
+        pred_x, pred_z = infer_step_encode(traj_tensor, time_tensor)
+        
+        # Store latent vectors
+        latent_vectors.append(pred_z[0, 0, ...].detach().cpu().numpy())  # First timestep only
+        all_latent_vectors.append(pred_z[0, ...].detach().cpu().numpy())  # All timesteps
+        
+    # Convert lists to numpy arrays
+    latent_vectors = np.stack(latent_vectors)
+    all_latent_vectors = np.stack(all_latent_vectors)
+    
+    print("Latent vectors shape:", latent_vectors.shape, 
+          "All timesteps shape:", all_latent_vectors.shape)
+
+    # Create inference function for latent space decoding
+    infer_step_decode = shjnn.make_infer_step(
+        model_func, encoder, decoder, optimizer, device, 
+        input_mode='latent'
+    )
+
+    # Define range of values to test for the selected latent dimension
+    range_size = 3  # +/- 3 standard deviations
+    test_values = np.linspace(-range_size, range_size, 10)
+
+    # Create colormap for the different test values
+    import matplotlib.colors as colors
+    import matplotlib.cm as cmx
+    color_norm = colors.Normalize(vmin=0, vmax=len(test_values))
+    color_map = cmx.ScalarMappable(norm=color_norm, cmap='cividis')
+
+    # Set up figure with subplots for each timestep of interest
+    num_timesteps = len(timesteps_interest)
+    fig_width = 7 * min(3, num_timesteps)  # Limit width for readability
+    fig_height = 4 * ((num_timesteps + 2) // 3)  # Arrange in rows of 3
+    
+    fig, axes = plt.subplots(
+        nrows=((num_timesteps + 2) // 3), 
+        ncols=min(3, num_timesteps), 
+        figsize=(fig_width, fig_height)
+    )
+    
+    # Handle case where there's only one subplot
+    if num_timesteps == 1:
+        axes = [axes]
+    elif num_timesteps <= 3:
+        axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
+    else:
+        axes = axes.flatten()
+
+    # Create time points for prediction
+    pred_times = np.linspace(0, 2.5, 1000)
+    time_tensor = torch.Tensor(pred_times).to(device)
+
+    # Process each timestep of interest
+    for timestep_idx, timestep in enumerate(timesteps_interest):
+        ax = axes[timestep_idx] if len(axes) > timestep_idx else axes[0]
+        
+        # Test each value in the range
+        for i, test_value in enumerate(test_values):
+            # Get color for this test value
+            color = color_map.to_rgba(i)
+
+            # Start with the mean latent vector from the dataset at the specific timestep
+            if timestep < all_latent_vectors.shape[1]:
+                base_latent = np.expand_dims(np.mean(all_latent_vectors[:, timestep, :], 0), 0)
+            else:
+                # Fallback to first timestep if timestep is out of bounds
+                base_latent = np.expand_dims(np.mean(latent_vectors, 0), 0)
+                print(f"Warning: Timestep {timestep} out of bounds, using first timestep")
+            
+            # Modify the target dimension with the test value
+            base_latent[..., latent_dim_number] += test_value
+            
+            # Convert to tensor and move to device
+            latent_tensor = torch.Tensor(base_latent).to(device)
+
+            # Get model prediction from the modified latent vector
+            pred_x, pred_z = infer_step_decode(latent_tensor, time_tensor)
+
+            # Convert prediction to numpy for plotting
+            pred_x_np = pred_x.detach().cpu().numpy()[0]
+
+            # Plot the prediction for the first dimension
+            label = 'z{}, {:.1f} + {:.1f}'.format(
+                latent_dim_number, 
+                base_latent[0, latent_dim_number] - test_value,  # Original value before modification
+                test_value
+            )
+            ax.plot(pred_times, pred_x_np[:, 0], '-', 
+                   label=label, alpha=0.6, color=color, linewidth=2)
+        
+        # Add labels and formatting for each subplot
+        ax.set_xlabel('Time [10$^{-7}$ + -log$_{10}(t)$ s]')
+        ax.set_ylabel('Charge [mA]')
+        ax.set_title(f'Timestep {timestep}')
+
+        # Add horizontal line at y=0
+        ax.hlines(0., -.1, 2.6, colors='k', linestyle='--', alpha=0.5)
+        ax.set_xlim(-.1, 2.6)
+        
+        # Add legend to first subplot only to avoid clutter
+        if timestep_idx == 0:
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    # Hide empty subplots
+    for i in range(num_timesteps, len(axes)):
+        axes[i].set_visible(False)
+
+    plt.tight_layout()
+
+    # Show the figure
+    if show:
+        plt.show()
+    
+    # Save the figure with subfolder structure
+    if save:
+        # Create main save directory
+        save_dir = os.path.join(model_params['folder'], 'time_evolved_latent_dims')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        
+        # Create subfolder for this latent dimension
+        dim_save_dir = os.path.join(save_dir, f'latent_dim_{latent_dim_number}')
+        if not os.path.exists(dim_save_dir):
+            os.makedirs(dim_save_dir)
+        
+        # Save the combined plot
+        fig.savefig(
+            os.path.join(dim_save_dir, f'epoch_{epoch_num}_dim_{latent_dim_number}_timesteps_{"_".join(map(str, timesteps_interest))}.png'), 
+            dpi=300, bbox_inches='tight'
+        )
+        
+        # Optionally save individual timestep plots
+        for timestep_idx, timestep in enumerate(timesteps_interest):
+            # Create individual plot for this timestep
+            individual_fig, individual_ax = plt.subplots(figsize=(7, 4))
+            
+            # Recreate the plot for this specific timestep
+            for i, test_value in enumerate(test_values):
+                color = color_map.to_rgba(i)
+                
+                if timestep < all_latent_vectors.shape[1]:
+                    base_latent = np.expand_dims(np.mean(all_latent_vectors[:, timestep, :], 0), 0)
+                else:
+                    base_latent = np.expand_dims(np.mean(latent_vectors, 0), 0)
+                
+                base_latent[..., latent_dim_number] += test_value
+                latent_tensor = torch.Tensor(base_latent).to(device)
+                pred_x, pred_z = infer_step_decode(latent_tensor, time_tensor)
+                pred_x_np = pred_x.detach().cpu().numpy()[0]
+                
+                label = 'z{}, {:.1f} + {:.1f}'.format(
+                    latent_dim_number, 
+                    base_latent[0, latent_dim_number] - test_value,
+                    test_value
+                )
+                individual_ax.plot(pred_times, pred_x_np[:, 0], '-', 
+                                 label=label, alpha=0.6, color=color, linewidth=2)
+            
+            individual_ax.set_xlabel('Time [10$^{-7}$ + -log$_{10}(t)$ s]')
+            individual_ax.set_ylabel('Charge [mA]')
+            individual_ax.set_title(f'Latent Dim {latent_dim_number}, Timestep {timestep}')
+            individual_ax.hlines(0., -.1, 2.6, colors='k', linestyle='--', alpha=0.5)
+            individual_ax.set_xlim(-.1, 2.6)
+            individual_ax.legend()
+            
+            plt.tight_layout()
+            
+            # Save individual plot
+            individual_fig.savefig(
+                os.path.join(dim_save_dir, f'epoch_{epoch_num}_dim_{latent_dim_number}_timestep_{timestep}.png'), 
+                dpi=300, bbox_inches='tight'
+            )
+            plt.close(individual_fig)
+        
+        print(f"Plots saved to: {dim_save_dir}")

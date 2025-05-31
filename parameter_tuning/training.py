@@ -16,6 +16,31 @@ from autoencoders import vae
 sys.path.append('../../libs/')
 import shjnn
 
+#chage beta to a dynamic rate
+def update_beta(model_params, epochs):
+    if model_params['beta_track'] is None:
+        model_params['beta_track'] = [model_params['beta']]
+    new = model_params['beta'] * model_params['beta_gain']
+    model_params['beta'] = new if new <= model_params['beta_max'] else model_params['beta_max']
+    model_params['beta_track'].append(model_params['beta'])
+
+#chage lr to a dynamic rate
+def update_lr(model_params, epochs):
+    if model_params['lr_track'] is None:
+        model_params['lr_track'] = [model_params['lr']]
+    new = model_params['lr'] * model_params['lr_decay']
+    model_params['lr'] = new if new >= model_params['lr_min'] else model_params['lr_min']
+    model_params['lr_track'].append(model_params['lr'])
+    
+
+def update_n_epochs(model_params, epochs):
+    return
+
+def update_params(model_params, epochs):
+    update_beta(model_params, epochs)
+    update_lr(model_params, epochs)
+    update_n_epochs(model_params, epochs)
+
 
 def B_VAE_training_loop(n_epochs, model_params=parameters.model_params, dataset=parameters.dataset):
     ''' run training loop with save 
@@ -35,7 +60,7 @@ def B_VAE_training_loop(n_epochs, model_params=parameters.model_params, dataset=
     beta = model_params['beta']
     optim = model_params['optim']
 
-
+    print("logs: learning rate: " + str(lr))
     for g in optim.param_groups:
         g['lr'] = lr
 
@@ -66,17 +91,6 @@ def B_VAE_training_loop(n_epochs, model_params=parameters.model_params, dataset=
     # print(f"debug: printing out mse loss: {np.average(_MSE_loss)}")
     model_params['MSE_loss'].append(np.average(_MSE_loss))
     model_params['KL_loss'].append(np.average(_KL_loss))
-
-    # except:
-        
-    #     model_params['epochs'] += model_params['epochs'][-1]
-    #     model_params['loss'].append(model_params['loss'][-1])
-    #     model_params['MSE_loss'].append(model_params['MSE_loss'][-1])
-    #     model_params['KL_loss'].append(model_params['KL_loss'][-1])
-    #     print('==================================')
-    #     print('Logs: training: B_VAE_training_loop: Exception raised, shjnn failed.')
-    #     print('loss', model_params['loss'], 'epochs', model_params['epochs'], 'MSE_loss', model_params['MSE_loss'], 'KL_loss', model_params['KL_loss'])
-    #     print('==================================')
 
     return model_params
 
@@ -269,21 +283,7 @@ def done_training(model_params=parameters.model_params):
     print("logs: Training: done_training: " + str(reach_epoch or reach_loss))
     return  reach_epoch or reach_loss
 
-#chage beta to a dynamic rate
-def update_beta(model_params, epochs):
-    model_params['beta'] = model_params['beta']
 
-#chage lr to a dynamic rate
-def update_lr(model_params, epochs):
-    model_params['lr'] = model_params['lr']
-
-def update_n_epochs(model_params, epochs):
-    return
-
-def update_params(model_params, epochs):
-    update_beta(model_params, epochs)
-    update_lr(model_params, epochs)
-    update_n_epochs(model_params, epochs)
 
 def train(model_params, dataset, grid_search=False, grid_search_name="default"):
     print("logs: Training: Running training")
@@ -327,13 +327,13 @@ def train(model_params, dataset, grid_search=False, grid_search_name="default"):
             case _:
                 print("Error: Invalid trainer, pick from options 'B-VAE', 'RNN', 'LSTM', 'RNN-VAE', 'MLP-VAE', 'LSTM-VAE'. Exiting.")
                 exit(1)
-        update_params(model_params, model_params['epochs'])
-        # loader.save_random_fit(model_params, dataset, random_samples=False)
-        # loader.save_model(model_params)
+        if model_params['b_vae_adaptive'] is True and parameters.trainer == 'B-VAE':
+            update_params(model_params, model_params['epochs'])
+        parameters.model.save_model(model_params)
         parameters.model.visualiser.display_random_fit(show=False, random_samples=model_params['random'])
     parameters.model.visualiser.plot_training_loss(model_params, save=True, split=False)
-    # loader.save_model_params(model_params)
-    parameters.model.save_model(model_params)
+    loader.save_model_params(model_params)
+    
     # parameters.model.Visualiser.compile_learning_gif(model_params, display=False)
     print("logs: Training: Finished training")
     return model_params
