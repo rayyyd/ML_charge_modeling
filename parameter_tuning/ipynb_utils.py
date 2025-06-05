@@ -435,7 +435,7 @@ def run_and_save_inference_all_trajectories(model_params, dataset, save_dir=None
     
 
 
-def get_mean_property_plot(model_params, dataset, show=True):
+def get_mean_property_plot(model_params, dataset, mean_map, show=True):
     """
     Get a mapping of mean property values for each sweep axis 'intensity', 'voltage', or 'delay' on 3 different plots.
     """
@@ -454,47 +454,6 @@ def get_mean_property_plot(model_params, dataset, show=True):
                     },
         }
     
-    
-    # Use run_and_save_inference_all_trajectories for comprehensive inference
-    all_predictions = run_and_save_inference_all_trajectories(model_params, dataset)
-    
-    
-    all_predictions = all_predictions.squeeze()
-    # for each value in one sweep axis, get the mean trajectory of all trajectories with that value in the sweep axis.
-    mean_map = {
-    'intensity': {0:[], 0.3:[], 1:[], 3:[], 10:[], 32:[]},
-    'voltage':   {0:[], 0.5:[], 1:[], 1.5:[], 2:[]},
-    'delay':     {
-                    0.0000001:[],  # was 1e-7
-                    0.000001:[],   # was 1e-6
-                    0.00001:[],    # was 1e-5
-                    0.0001:[],     # was 1e-4
-                    0.001:[],      # was 1e-3
-                    0.01:[],       # was 1e-2
-                    0.02:[],       # was 2e-2
-                    0.05:[]       # was 5e-2
-                }
-    }
-    
-    # append 
-    def canonical(x, ndp=7):
-        x = x.item()
-        return round(float(x), ndp)
-
-    for i, meta in enumerate(dataset['y']):
-        meta_cpu = meta.detach().cpu().numpy()
-       
-        int_key   = canonical(meta_cpu[0])      # 0, 32, 10, …
-        volt_key  = canonical(meta_cpu[1])      # 0, 0.5, 1, …
-        delay_key = canonical(meta_cpu[2])      # 0.01, 1e-3, …
-
-        mean_map['intensity'][int_key].append(all_predictions[i])
-        mean_map['voltage'][volt_key].append(all_predictions[i])
-        try:
-            mean_map['delay'][delay_key].append(all_predictions[i])
-        except:
-            continue
-
     # plot each.
     cmap = plt.get_cmap('viridis')
     fig, axs = plt.subplots(1, 3, figsize=(15, 5))
