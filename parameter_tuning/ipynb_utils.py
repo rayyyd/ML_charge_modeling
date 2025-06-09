@@ -433,12 +433,88 @@ def run_and_save_inference_all_trajectories(model_params, dataset, save_dir=None
     
     return all_predictions
     
+def get_mean_trajectories(model_params, dataset):
+    all_predictions = ipynb_utils.run_and_save_inference_all_trajectories(model_params, dataset)
+    
+    
+    all_predictions = all_predictions.squeeze()
+    # for each value in one sweep axis, get the mean trajectory of all trajectories with that value in the sweep axis.
+    mean_map = {
+    'intensity': {0:[], 0.3:[], 1:[], 3:[], 10:[], 32:[]},
+    'voltage':   {0:[], 0.5:[], 1:[], 1.5:[], 2:[]},
+    'delay':     {
+                    0.0000001:[],  # was 1e-7
+                    0.000001:[],   # was 1e-6
+                    0.00001:[],    # was 1e-5
+                    0.0001:[],     # was 1e-4
+                    0.001:[],      # was 1e-3
+                    0.01:[],       # was 1e-2
+                    0.02:[],       # was 2e-2
+                    0.05:[]       # was 5e-2
+                }
+    }
+    
+    mean_map_original_data = {
+    'intensity': {0:[], 0.3:[], 1:[], 3:[], 10:[], 32:[]},
+    'voltage':   {0:[], 0.5:[], 1:[], 1.5:[], 2:[]},
+    'delay':     {
+                    0.0000001:[],  # was 1e-7
+                    0.000001:[],   # was 1e-6
+                    0.00001:[],    # was 1e-5
+                    0.0001:[],     # was 1e-4
+                    0.001:[],      # was 1e-3
+                    0.01:[],       # was 1e-2
+                    0.02:[],       # was 2e-2
+                    0.05:[]       # was 5e-2
+                }
+    }
+    
+    mean_map_indices = {
+    'intensity': {0:[], 0.3:[], 1:[], 3:[], 10:[], 32:[]},
+    'voltage':   {0:[], 0.5:[], 1:[], 1.5:[], 2:[]},
+    'delay':     {
+                    0.0000001:[],  # was 1e-7
+                    0.000001:[],   # was 1e-6
+                    0.00001:[],    # was 1e-5
+                    0.0001:[],     # was 1e-4
+                    0.001:[],      # was 1e-3
+                    0.01:[],       # was 1e-2
+                    0.02:[],       # was 2e-2
+                    0.05:[]       # was 5e-2
+                }
+    }
+    
+    # append 
+    def canonical(x, ndp=7):
+        x = x.item()
+        return round(float(x), ndp)
 
+    for i, meta in enumerate(dataset['y']):
+        meta_cpu = meta.detach().cpu().numpy()
+       
+        int_key   = canonical(meta_cpu[0])      # 0, 32, 10, …
+        volt_key  = canonical(meta_cpu[1])      # 0, 0.5, 1, …
+        delay_key = canonical(meta_cpu[2])      # 0.01, 1e-3, …
+        
+        mean_map['intensity'][int_key].append(all_predictions[i])
+        mean_map_indices['intensity'][int_key].append(i)
+        mean_map_original_data['intensity'][int_key].append(dataset['trajs'][i].detach().cpu())
+        mean_map['voltage'][volt_key].append(all_predictions[i])
+        mean_map_indices['voltage'][volt_key].append(i)
+        mean_map_original_data['voltage'][volt_key].append(dataset['trajs'][i].detach().cpu())
+        mean_map['delay'][delay_key].append(all_predictions[i])
+        mean_map_indices['delay'][delay_key].append(i)
+        mean_map_original_data['delay'][delay_key].append(dataset['trajs'][i].detach().cpu())
+        
+    return mean_map, mean_map_indices, mean_map_original_data
+      
+    
 
-def get_mean_property_plot(model_params, dataset, mean_map, show=True):
+def get_mean_property_plot(model_params, dataset, mean_map, mean_map_orig, show=True):
     """
     Get a mapping of mean property values for each sweep axis 'intensity', 'voltage', or 'delay' on 3 different plots.
     """
+    time_points = dataset['times']
     val_map = {
             # intensity in uJ
             'intensity': {'source': 'int',
@@ -453,16 +529,21 @@ def get_mean_property_plot(model_params, dataset, mean_map, show=True):
                     '500ns': 5e-7, '500us': 5e-4, '50ms': 5e-2, '50us': 5e-5, '5ms': 5e-3, '5us': 5e-6,
                     },
         }
+
+
     
     # plot each.
     cmap = plt.get_cmap('viridis')
     fig, axs = plt.subplots(1, 3, figsize=(15, 5))
     pred_times = np.linspace(0, 2.5, 1000) + 1  # +1 accounts for time bias
     scale_factor = 50 * 1e2 / 1e3
+    orig_time = time_points[0].detach().cpu()
+    # for each attribute
     for i, (key, value) in enumerate(mean_map.items()):
         ax = axs[i]
         n_groups = len(value)
         colors = cmap(np.linspace(0, 1, n_groups))
+        # for each value in the attribute
         for j, (sub_key, trajectories) in enumerate(value.items()):
             if len(trajectories) > 0:
                 mean_trajectory = np.mean(trajectories, axis=0)
@@ -476,12 +557,110 @@ def get_mean_property_plot(model_params, dataset, mean_map, show=True):
                     linewidth=2,
                     alpha=0.8
                 )
+                mean_orig_trajectory = np.mean(mean_map_orig[key][sub_key], axis=0)
+                ax.plot(
+                    orig_time,
+                    mean_orig_trajectory / scale_factor,
+                    '.',
+                    color=colors[j],
+                    linewidth=1,
+                    alpha=0.5
+                )
         
         ax.set_title(f"Mean Trajectories for {key.capitalize()}")
         ax.set_xlabel("Time")
         ax.set_ylabel("Intensity")
         ax.legend()
         
+def latent_means_for_parameter(mean_map_indices, latent):
+    # plot means of latent dimensions for each parameter value
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    intensity_dict = {}
+    for (key, intensities) in mean_map_indices['intensity'].items():
+        latent_total = []
+        if len(intensities) == 0:
+            continue
+        for idx in intensities:
+            latent_total.append(latent[idx, :])
+        latent_mean = np.array(latent_total).mean(axis=0)
+        intensity_dict[key] = latent_mean
+
+    filtered = {k: v for k, v in intensity_dict.items() if v is not []}
+    keys = sorted(filtered.keys())
+    series_count = max(len(v) for v in filtered.values())
+    for i in range(series_count):
+        xs = []
+        ys = []
+        for k in keys:
+            values = filtered[k]
+            # Ensure the current series index exists in the list
+            if len(values) > i:
+                xs.append(k)
+                ys.append(values[i])
+        axes[0].plot(xs, ys, marker='o', label=f'Latent Dim {i}')
+    axes[0].set_title('Latent Mean by Intensity')
+    axes[0].set_xlabel('Intensity')
+    axes[0].set_ylabel('Latent Mean Value')
+    axes[0].legend()
+
+
+    voltage_dict = {}
+    for (key, voltages) in mean_map_indices['voltage'].items():
+        latent_total = []
+        if len(voltages) == 0:
+            continue
+        for idx in voltages:
+            latent_total.append(latent[idx, :])
+        latent_mean = np.array(latent_total).mean(axis=0)
+        voltage_dict[key] = latent_mean
+    filtered = {k: v for k, v in voltage_dict.items() if v is not []}
+    keys = sorted(filtered.keys())
+    series_count = max(len(v) for v in filtered.values())
+    for i in range(series_count):
+        xs = []
+        ys = []
+        for k in keys:
+            values = filtered[k]
+            # Ensure the current series index exists in the list
+            if len(values) > i:
+                xs.append(k)
+                ys.append(values[i])
+        axes[1].plot(xs, ys, marker='o', label=f'Latent Dim {i}')
+    axes[1].set_title('Latent Mean by Voltage')
+    axes[1].set_xlabel('Voltage')
+    axes[1].set_ylabel('Latent Mean Value')
+    axes[1].legend()
+
+    delay_dict = {}
+    for (key, delays) in mean_map_indices['delay'].items():
+        latent_total = []
+        if len(delays) == 0:
+            continue
+        for idx in delays:
+            latent_total.append(latent[idx, :])
+        latent_mean = np.array(latent_total).mean(axis=0)
+        delay_dict[key] = latent_mean
+    filtered = {k: v for k, v in delay_dict.items() if v is not []}
+    keys = sorted(filtered.keys())
+    series_count = max(len(v) for v in filtered.values())
+    for i in range(series_count):
+        xs = []
+        ys = []
+        for k in keys:
+            values = filtered[k]
+            # Ensure the current series index exists in the list
+            if len(values) > i:
+                xs.append(k)
+                ys.append(values[i])
+        axes[2].plot(xs, ys, marker='o', label=f'Latent Dim {i}')
+    axes[2].set_title('Latent Mean by Delay')
+    axes[2].set_xlabel('Delay')
+    axes[2].set_xscale('log')
+    axes[2].set_ylabel('Latent Mean Value')
+    axes[2].legend()
+
+
+      
     
 
 if __name__ == "__main__":

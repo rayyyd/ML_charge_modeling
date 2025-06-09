@@ -64,7 +64,7 @@ model_params = {
     'rnn_nhidden': 512,
     'obs_dim': 6,  # Changed from 1 to 6 to match input data dimensions
 
-    'latent_dim': 8,
+    'latent_dim': 3,
         
     'b_vae_adaptive': True,
     
