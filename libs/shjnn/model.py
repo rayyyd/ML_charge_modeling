@@ -80,7 +80,7 @@ class RecognitionRNN(nn.Module):
     distributions (mean and variance). The model acts as a variational encoder.
     """
 
-    def __init__(self, latent_dim=4, obs_dim=2, hidden_size=25, batch_size=1):
+    def __init__(self, latent_dim, obs_dim, hidden_size, batch_size=1):
         """
         Initialize the recognition RNN.
         
@@ -200,7 +200,7 @@ class Decoder(nn.Module):
     acting as the decoder in the variational autoencoder framework.
     """
 
-    def __init__(self, latent_dim=4, obs_dim=2, hidden_size=20):
+    def __init__(self, latent_dim, obs_dim=2, hidden_size=20):
         """
         Initialize the decoder network.
         

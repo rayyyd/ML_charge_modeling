@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import time, os, pickle
 import pandas as pd
+import shap
 
 
 import init
@@ -128,8 +129,86 @@ def collapse_cells():
 
     print(f"✅ All cells in {NOTEBOOK_FILENAME} marked collapsed in metadata.")
     
+def integrate_wrt_time(timestamps, values):
+    """
+    Numerically integrate a 1-D signal with respect to time.
 
-def sweep_latent_adaptive(model_params, dataset, latent_dim_number, latent_vectors, all_latent_vectors, specific_traj_list=None, save=False, show=False):
+    Parameters
+    ----------
+    timestamps : list or 1-D array-like (length N)
+        Monotonically increasing time points (e.g. produced by np.linspace).
+    values : list or 1-D array-like (length N)
+        Signal values sampled at the corresponding timestamps.
+
+    Returns
+    -------
+    float
+        The integral ∫ value(t) dt over the full time span.
+    """
+    # Convert to NumPy arrays for vectorised operations
+    t = np.asarray(timestamps, dtype=float)
+    y = np.asarray(values, dtype=float)
+
+    # Basic validity checks
+    if t.shape != y.shape:
+        raise ValueError("timestamps and values must have the same length.")
+    if t.ndim != 1:
+        raise ValueError("Inputs must be one-dimensional sequences.")
+    if not np.all(np.diff(t) > 0):
+        raise ValueError("timestamps must be strictly increasing.")
+
+    # Trapezoidal rule (works for uniform or non-uniform spacing)
+    integral = np.trapz(y, t)
+    return float(integral)
+
+def steepest_descending_gradient(timestamps, values, window=50):
+    """
+    Find the steepest negative (descending) gradient that spans a fixed
+    number of consecutive samples.
+
+    Parameters
+    ----------
+    timestamps : 1-D array-like
+        Monotonically increasing time points (length N ≥ window+1).
+    values : 1-D array-like
+        Signal values sampled at the corresponding timestamps.
+    window : int, default 50
+        Width of the sliding window (in *samples*, not seconds).
+
+    Returns
+    -------
+    grad_min : float
+        The most negative slope over any `window`-wide segment:
+        (y[i+window] - y[i]) / (t[i+window] - t[i]).
+    start_idx : int
+        Index i at which that steepest segment begins.
+    end_idx : int
+        Index i+window at which that segment ends.
+    """
+    # Convert to NumPy arrays
+    t = np.asarray(timestamps, dtype=float)
+    y = np.asarray(values, dtype=float)
+
+    if t.shape != y.shape:
+        raise ValueError("timestamps and values must have the same length.")
+    if len(t) <= window:
+        raise ValueError("Input length must exceed the window size.")
+    if not np.all(np.diff(t) > 0):
+        raise ValueError("timestamps must be strictly increasing.")
+
+    # Vectorised two-point slope over each window-wide span
+    dt = t[window:] - t[:-window]      # size N-window
+    dy = y[window:] - y[:-window]      # size N-window
+    slopes = dy / dt                   # slope for each window start
+
+    # The steepest *descending* gradient = most negative slope
+    start_idx = int(np.argmin(slopes))
+    end_idx = start_idx + window
+    grad_min = slopes[start_idx]
+
+    return grad_min
+
+def sweep_latent_adaptive(model_params, dataset, latent_dim_number, latent_vectors, all_latent_vectors, specific_traj_list=None, save=False, show=False, show_integrals=False):
     """
     Visualize the effect of varying a specific latent dimension.
     
@@ -218,14 +297,25 @@ def sweep_latent_adaptive(model_params, dataset, latent_dim_number, latent_vecto
 
         # Convert prediction to numpy for plotting
         pred_x_np = pred_x.detach().cpu().numpy()[0]
-
+        scale_factor = 50 * 1e2 / 1e3
         # Plot the prediction for the first dimension
-        label = 'z{}, {:.1f} + {:.1f}'.format(
-            latent_dim_number, 
-            np.mean(latent_vectors, 0)[latent_dim_number],
-            test_value
-        )
-        ax.plot(pred_times, pred_x_np[:, 0], '-', 
+        if show_integrals:
+            integral = integrate_wrt_time(pred_times, pred_x_np[:, 0]/scale_factor)
+            derivative = steepest_descending_gradient(pred_times, pred_x_np[:, 0]/scale_factor)
+            label = 'z{}, {:.1f} + {:.1f}, ∫: {:.1f}, ∇: {:.1f} '.format(
+                latent_dim_number, 
+                np.mean(latent_vectors, 0)[latent_dim_number],
+                test_value,
+                integral,
+                derivative
+            )
+        else:
+            label = 'z{}, {:.1f} + {:.1f}'.format(
+                latent_dim_number, 
+                np.mean(latent_vectors, 0)[latent_dim_number],
+                test_value
+            )
+        ax.plot(pred_times, pred_x_np[:, 0] / scale_factor, '-', 
                label=label, alpha=0.6, color=color, linewidth=2)
         
         #calculate MSE against reference.
@@ -569,7 +659,7 @@ def get_mean_property_plot(model_params, dataset, mean_map, mean_map_orig, show=
         
         ax.set_title(f"Mean Trajectories for {key.capitalize()}")
         ax.set_xlabel("Time")
-        ax.set_ylabel("Intensity")
+        ax.set_ylabel("Charge [mA]")
         ax.legend()
         
 def latent_means_for_parameter(mean_map_indices, latent):
@@ -660,8 +750,334 @@ def latent_means_for_parameter(mean_map_indices, latent):
     axes[2].legend()
 
 
-      
+
+
+
+def plot_shap_analysis(shap_values, feature_importance, model_params, 
+                      save=True, show=True):
+    """
+    Create comprehensive SHAP visualization plots.
     
+    Parameters
+    ----------
+    shap_values : shap.Explanation
+        SHAP values from the analysis
+    feature_importance : numpy.ndarray
+        Mean absolute SHAP values for each latent dimension
+    model_params : dict
+        Dictionary containing model parameters
+    save : bool, default=True
+        Whether to save the plots
+    show : bool, default=True
+        Whether to display the plots
+    """
+    
+    epoch_num = model_params['epochs']
+    folder = model_params['folder']
+    
+    # Create figure with multiple subplots
+    fig = plt.figure(figsize=(20, 12))
+    
+    # 1. Feature importance bar plot
+    ax1 = plt.subplot(2, 3, 1)
+    latent_dim_names = [f'Latent Dim {i}' for i in range(len(feature_importance))]
+    bars = ax1.bar(range(len(feature_importance)), feature_importance, 
+                   color='steelblue', alpha=0.7)
+    ax1.set_xlabel('Latent Dimension')
+    ax1.set_ylabel('Mean |SHAP Value|')
+    ax1.set_title('Latent Dimension Importance')
+    ax1.set_xticks(range(len(feature_importance)))
+    ax1.set_xticklabels([f'Z{i}' for i in range(len(feature_importance))], 
+                       rotation=45)
+    
+    # Add value labels on bars
+    for i, (bar, value) in enumerate(zip(bars, feature_importance)):
+        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.001,
+                f'{value:.3f}', ha='center', va='bottom', fontsize=10)
+    
+    # 2. SHAP summary plot (beeswarm plot)
+    ax2 = plt.subplot(2, 3, 2)
+    plt.sca(ax2)
+    shap.plots.beeswarm(shap_values[:, :, 0], max_display=len(feature_importance), 
+                       show=False)
+    ax2.set_title('SHAP Values Distribution (First Time Point)')
+    
+    # 3. SHAP waterfall plot for a representative sample
+    ax3 = plt.subplot(2, 3, 3)
+    plt.sca(ax3)
+    # Use the first sample for waterfall plot
+    shap.plots.waterfall(shap_values[0, :, 0], max_display=len(feature_importance), 
+                        show=False)
+    ax3.set_title('SHAP Waterfall (Sample 0, t=0)')
+    
+    # 4. Heatmap of SHAP values across time for top dimensions
+    ax4 = plt.subplot(2, 3, 4)
+    # Get top 5 most important dimensions
+    top_dims = np.argsort(feature_importance)[-5:]
+    
+    # Average SHAP values across samples for visualization
+    mean_shap_over_time = np.mean(np.abs(shap_values.values), axis=0)
+    heatmap_data = mean_shap_over_time[top_dims, ::50]  # Subsample time points
+    
+    im = ax4.imshow(heatmap_data, aspect='auto', cmap='RdBu_r', 
+                   interpolation='nearest')
+    ax4.set_xlabel('Time Point (subsampled)')
+    ax4.set_ylabel('Latent Dimension')
+    ax4.set_title('SHAP Values Over Time (Top 5 Dimensions)')
+    ax4.set_yticks(range(len(top_dims)))
+    ax4.set_yticklabels([f'Z{i}' for i in top_dims])
+    plt.colorbar(im, ax=ax4, label='Mean |SHAP Value|')
+    
+    # 5. Correlation between latent dimensions and output variance
+    ax5 = plt.subplot(2, 3, 5)
+    # Calculate variance of SHAP values for each dimension across samples
+    shap_variance = np.var(shap_values.values, axis=(0, 2))
+    ax5.scatter(feature_importance, shap_variance, alpha=0.7, s=50)
+    ax5.set_xlabel('Mean |SHAP Value|')
+    ax5.set_ylabel('SHAP Value Variance')
+    ax5.set_title('Importance vs Variability')
+    
+    # Add labels for each point
+    for i, (imp, var) in enumerate(zip(feature_importance, shap_variance)):
+        ax5.annotate(f'Z{i}', (imp, var), xytext=(5, 5), 
+                    textcoords='offset points', fontsize=8)
+    
+    # 6. Top dimensions detailed analysis
+    ax6 = plt.subplot(2, 3, 6)
+    top_3_dims = np.argsort(feature_importance)[-3:]
+    
+    for i, dim in enumerate(top_3_dims):
+        dim_shap_over_time = np.mean(shap_values.values[:, dim, :], axis=0)
+        time_points = np.linspace(0, 2.5, len(dim_shap_over_time))
+        ax6.plot(time_points, dim_shap_over_time, 
+                label=f'Z{dim} (imp: {feature_importance[dim]:.3f})',
+                linewidth=2, alpha=0.8)
+    
+    ax6.set_xlabel('Time [log scale]')
+    ax6.set_ylabel('Mean SHAP Value')
+    ax6.set_title('SHAP Evolution for Top 3 Dimensions')
+    ax6.legend()
+    ax6.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    # Save the figure
+    if save:
+        save_dir = folder + '/shap_analysis'
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        fig.savefig(save_dir + f'/shap_analysis_epoch_{epoch_num}.png', 
+                   dpi=300, bbox_inches='tight')
+        print(f"SHAP analysis plots saved to: {save_dir}")
+    
+    # Show the plot
+    if show:
+        plt.show()
+    
+    # Print summary statistics
+    print("\n=== SHAP Analysis Summary ===")
+    print(f"Most important latent dimensions:")
+    importance_ranking = np.argsort(feature_importance)[::-1]
+    for i, dim_idx in enumerate(importance_ranking[:5]):
+        print(f"  {i+1}. Latent Dim {dim_idx}: {feature_importance[dim_idx]:.4f}")
+    
+    print(f"\nTotal explained variance: {np.sum(feature_importance):.4f}")
+    print(f"Top 3 dimensions explain {np.sum(feature_importance[importance_ranking[:3]]):.1%} of importance")
+
+def shap_analysis(model_params, dataset, latent_vectors, 
+                                        background_size=100, num_samples=150, 
+                                        save=True, show=True):
+    """
+    Use SHAP to analyze how each latent dimension relates to the model's output.
+    
+    This function creates a wrapper around the decoder to enable SHAP analysis,
+    calculates SHAP values for each latent dimension, and creates visualizations
+    showing which latent dimensions are most important for the model's predictions.
+    
+    Parameters
+    ----------
+    model_params : dict
+        Dictionary containing model parameters and components
+        Required keys: 'func', 'rec', 'dec', 'optim', 'device', 'epochs', 'folder'
+    dataset : dict
+        Dictionary containing dataset components
+    latent_vectors : numpy.ndarray
+        Array of latent vectors from the encoded trajectories
+    background_size : int, default=100
+        Number of background samples for SHAP analysis
+    num_samples : int, default=200
+        Number of samples to analyze with SHAP
+    save : bool, default=True
+        Whether to save the plots
+    show : bool, default=True
+        Whether to display the plots
+        
+    Returns
+    -------
+    shap_values : numpy.ndarray
+        SHAP values for each latent dimension
+    feature_importance : numpy.ndarray
+        Mean absolute SHAP values for each latent dimension
+    """
+    
+    # Extract model components
+    model_func = model_params['func']
+    encoder = model_params['rec']
+    decoder = model_params['dec']
+    optimizer = model_params['optim']
+    device = model_params['device']
+    epoch_num = model_params['epochs']
+    latent_dims = model_params['latent_dim']
+    
+    # Create inference function for latent space decoding
+    infer_step_decode = shjnn.make_infer_step(
+        model_func, encoder, decoder, optimizer, device, 
+        input_mode='latent'
+    )
+    
+    # Create time points for prediction
+    pred_times = np.linspace(0, 2.5, 1000)
+    time_tensor = torch.Tensor(pred_times).to(device)
+    
+    def model_wrapper(latent_input):
+        """
+        Wrapper function for the decoder that SHAP can use.
+        
+        Parameters
+        ----------
+        latent_input : numpy.ndarray
+            Batch of latent vectors to decode
+            
+        Returns
+        -------
+        numpy.ndarray
+            Model predictions as numpy array
+        """
+        predictions = []
+        
+        for latent_vec in latent_input:
+            # Convert to tensor and move to device
+            latent_tensor = torch.Tensor(latent_vec.reshape(1, -1)).to(device)
+            
+            # Get model prediction from latent vector
+            pred_x, pred_z = infer_step_decode(latent_tensor, time_tensor)
+            
+            # Convert to numpy and extract first dimension (charge)
+            pred_x_np = pred_x.detach().cpu().numpy()[0, :, 0]  # Shape: (time_steps,)
+            predictions.append(pred_x_np)
+        
+        return np.array(predictions)
+    
+    # Prepare data for SHAP analysis
+    # Use subset of latent vectors for efficiency
+    analysis_indices = np.random.choice(len(latent_vectors), 
+                                      min(num_samples, len(latent_vectors)), 
+                                      replace=False)
+    analysis_latents = latent_vectors[analysis_indices]
+    
+    # Create background dataset for SHAP
+    background_indices = np.random.choice(len(latent_vectors), 
+                                        min(background_size, len(latent_vectors)), 
+                                        replace=False)
+    background_latents = latent_vectors[background_indices]
+    
+    print(f"Running SHAP analysis on {len(analysis_latents)} samples...")
+    print(f"Using {len(background_latents)} background samples...")
+    print(f"Latent dimension size: {latent_dims}")
+    
+    # Create SHAP explainer
+    explainer = shap.Explainer(model_wrapper, background_latents)
+    
+    # Calculate SHAP values
+    shap_values = explainer(analysis_latents)
+    
+    # Get feature importance (mean absolute SHAP values)
+    feature_importance = np.mean(np.abs(shap_values.values), axis=(0, 2))
+    
+    print(f"SHAP analysis complete. Shape of SHAP values: {shap_values.values.shape}")
+    print(f"Feature importance shape: {feature_importance.shape}")
+    
+    # Create visualizations
+    plot_shap_analysis(shap_values, feature_importance, model_params, 
+                      save=save, show=show)
+    
+    return shap_values, feature_importance
+
+def example_shap_usage():
+    """
+    Example usage of the SHAP analysis function.
+    
+    This function demonstrates how to:
+    1. Load a trained model and dataset
+    2. Extract latent vectors
+    3. Run SHAP analysis
+    4. Interpret the results
+    
+    Usage (in a Jupyter notebook):
+    ```python
+    import ipynb_utils
+    
+    # Assuming you have model_params and dataset already loaded
+    latent_vectors, all_latent_vectors = ipynb_utils.get_latent_vectors(model_params, dataset)
+    
+    # Run SHAP analysis
+    shap_values, feature_importance = ipynb_utils.analyze_latent_dimensions_with_shap(
+        model_params, dataset, latent_vectors, 
+        background_size=50,  # Use smaller values for faster computation
+        num_samples=100,     # Adjust based on your dataset size
+        save=True,          # Save plots to model folder
+        show=True           # Display plots in notebook
+    )
+    
+    # The analysis will:
+    # 1. Create a comprehensive plot with 6 subplots showing different aspects of SHAP analysis
+    # 2. Print summary statistics about which latent dimensions are most important
+    # 3. Return shap_values and feature_importance for further analysis
+    
+    # Example of further analysis:
+    print("Most important latent dimensions:")
+    importance_ranking = np.argsort(feature_importance)[::-1]
+    for i, dim_idx in enumerate(importance_ranking[:3]):
+        print(f"  Latent Dim {dim_idx}: {feature_importance[dim_idx]:.4f}")
+    ```
+    
+    The SHAP analysis will create visualizations showing:
+    - Bar plot of feature importance for each latent dimension
+    - Beeswarm plot showing distribution of SHAP values
+    - Waterfall plot for a single sample showing individual contributions
+    - Heatmap of SHAP values over time for top dimensions
+    - Scatter plot of importance vs variability
+    - Time evolution plot for the top 3 most important dimensions
+    """
+    print("This is an example function showing how to use SHAP analysis.")
+    print("See the docstring for detailed usage instructions.")
+    
+    print("\n=== Quick Start Example ===")
+    print("# In your Jupyter notebook:")
+    print("latent_vectors, _ = ipynb_utils.get_latent_vectors(model_params, dataset)")
+    print("shap_values, importance = ipynb_utils.analyze_latent_dimensions_with_shap(")
+    print("    model_params, dataset, latent_vectors)")
+
+def extract_linear_map(infer_step_decode, model_params, time_tensor):
+    device = model_params['device']
+    D = model_params['latent_dim']
+    # 1) Get the bias by passing all-zeros through
+    z0 = torch.zeros((1, D), device=device)
+    y0, _ = infer_step_decode(z0, time_tensor)
+    b = y0.squeeze()[0].item()         # scalar bias
+
+    # 2) For each latent dim i, set that dim = 1 and compute output
+    weights = torch.zeros(D, device=device)
+    bias = torch.tensor(b, device=device)  # ensure bias is a tensor for subtraction
+    for i in range(D):
+        zi = torch.zeros((1, D), device=device)
+        zi[0, i] = 1.0
+        yi, _ = infer_step_decode(zi, time_tensor)
+        weights[i] = yi.squeeze()[0] - b
+
+    return weights.cpu().numpy(), b
+
+
 
 if __name__ == "__main__":
     collapse_cells()
