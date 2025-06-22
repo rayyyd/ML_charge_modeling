@@ -4,6 +4,7 @@ from serial import RNN, LSTM
 from autoencoders import vae
 import b_vae
 import torch
+import numpy
 
 import data_dropout
 
