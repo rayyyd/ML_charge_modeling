@@ -158,9 +158,9 @@ class B_VAE:
             pass
 
 
-        def plot_training_loss(self, model_params=parameters.model_params, save=False, split=False, plot_total=True, plot_MSE=True, plot_KL=True):
+        def plot_training_loss(self, model_params=parameters.model_params, save=False, split=False, plot_total=False, plot_MSE=True, plot_KL=True):
             # NOTE: uncomment or comment these to toggle between.
-            visualisation.plot_training_loss(model_params, save=save, split=split, plot_total=plot_total, plot_MSE=False, plot_KL=False)
+            visualisation.plot_training_loss(model_params, save=save, split=split, plot_total=plot_total, plot_MSE=plot_MSE, plot_KL=plot_KL)
             # visualisation.plot_training_loss(model_params, save=save, split=True, plot_total=False, plot_MSE=plot_MSE, plot_KL=plot_KL)
             
 

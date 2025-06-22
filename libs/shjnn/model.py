@@ -230,7 +230,7 @@ class Decoder(nn.Module):
         """
         # Apply network layers with activation
         out = self.fc1(latent_state)
-        out = self.relu(out)
+        # out = self.relu(out)
 
         out = self.fc2(out)
 
