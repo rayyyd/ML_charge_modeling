@@ -52,7 +52,7 @@ model_params = {
     # hyper params
 
     #NOTE: reccomended to increase rnn_nhidden size.
-    'nhidden': 256,
+    'nhidden': 512,
     
     'rnn_linear1': 256,
     'rnn_linear2': 128,
@@ -61,19 +61,19 @@ model_params = {
     'rnn_linear5': 256,
     
     
-    'rnn_nhidden': 256,
-    'obs_dim': 6,  # Changed from 1 to 6 to match input data dimensions
+    'rnn_nhidden': 512,
+    'obs_dim': 1,  # Changed from 1 to 6 to match input data dimensions
 
-    'latent_dim': 6,
+    'latent_dim': 5,
         
     'b_vae_adaptive': True,
     
-    'lr':5e-5,
-    'lr_decay': 1,  # learning rate decay
+    'lr':1e-3,
+    'lr_decay': 0.5,  # learning rate decay
     'lr_min': 1e-7,
     
-    'beta': 1,
-    'beta_gain': 1,  # beta gain for adaptive training
+    'beta': 0.5,
+    'beta_gain': 2,  # beta gain for adaptive training
     'beta_max': 4,  # maximum beta value
     
     'n_batch': 16,  #batch size
@@ -89,8 +89,8 @@ model_params = {
     # training params
     # TODO: doesn't make too much sense for separate epochs per train and total epochs.
     # NOTE: due a bug, total_epochs_Train must be greater than 14.
-    'total_epochs_train': 500,
-    'epochs_per_train': 5,
+    'total_epochs_train': 2000,
+    'epochs_per_train': 100,
     'epochs': 0, # a record of the epochs
     'loss': [], # loss = KL_loss + MSE loss
     'loss_thresh': 0.00001,
