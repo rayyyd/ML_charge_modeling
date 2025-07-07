@@ -17,6 +17,7 @@ from b_vae import B_VAE
 from autoencoders import vae
 import matplotlib.colors as colors
 import matplotlib.cm as cmx
+from matplotlib.offsetbox import AnchoredText  
 from matplotlib.colors import LinearSegmentedColormap
 
 sys.path.append('../../libs/')
@@ -500,8 +501,6 @@ def get_mean_trajectories(model_params, dataset):
                     0.0001:[],     # was 1e-4
                     0.001:[],      # was 1e-3
                     0.01:[],       # was 1e-2
-                    0.02:[],       # was 2e-2
-                    0.05:[]       # was 5e-2
                 }
     }
     
@@ -515,8 +514,6 @@ def get_mean_trajectories(model_params, dataset):
                     0.0001:[],     # was 1e-4
                     0.001:[],      # was 1e-3
                     0.01:[],       # was 1e-2
-                    0.02:[],       # was 2e-2
-                    0.05:[]       # was 5e-2
                 }
     }
     
@@ -530,8 +527,6 @@ def get_mean_trajectories(model_params, dataset):
                     0.0001:[],     # was 1e-4
                     0.001:[],      # was 1e-3
                     0.01:[],       # was 1e-2
-                    0.02:[],       # was 2e-2
-                    0.05:[]       # was 5e-2
                 }
     }
     
@@ -983,7 +978,7 @@ def extract_linear_map(infer_step_decode, model_params, time_tensor):
 
     return weights.cpu().numpy(), b
 
-def latent_trajectory_with_overlay(all_latent_vectors, real_trajectory, sample_list=None, show=True, save=False, save_path=None):
+def latent_trajectory_with_overlay(all_latent_vectors, real_trajectory, sample_index=None, show=True, save=False, save_path=None):
     """
     Plot how every latent dimension's mean evolves over timesteps.
     
@@ -1007,16 +1002,18 @@ def latent_trajectory_with_overlay(all_latent_vectors, real_trajectory, sample_l
     None
         Creates and optionally displays/saves the plot
     """
-    
+    # assert(real_trajectory.shape[0] == 1)
     # Select samples to include in mean calculation
-    if sample_list is None:
+    if sample_index is None:
         selected_vectors = all_latent_vectors  # Use all samples
     else:
-        selected_vectors = all_latent_vectors[sample_list]  # Use specified samples
+        selected_vectors = all_latent_vectors[sample_index:sample_index+1, :, :]  # Use specified samples
+        real_trajectory = real_trajectory[sample_index:sample_index+1, :, :]  # Use specified samples for real trajectory
     
     # Calculate mean across samples for each timestep and latent dimension
     # Shape: (n_timesteps, n_latent_dims)
     mean_latent_trajectory = np.mean(selected_vectors, axis=0)
+    print("initial value:", mean_latent_trajectory[0])
     print(real_trajectory.shape)
     real_trajectory = np.mean(real_trajectory, axis=0)  # Ensure real_trajectory is averaged if needed
     print(real_trajectory.shape)
@@ -1024,6 +1021,7 @@ def latent_trajectory_with_overlay(all_latent_vectors, real_trajectory, sample_l
     timesteps = np.arange(n_timesteps)
     
     #calculate summed output
+    all_sorted_weighted = selected_vectors
     summed_output = all_sorted_weighted.sum(axis=2) + bias
     plot_times = np.linspace(0, 1000, 70)
     # Create figure
@@ -1040,27 +1038,32 @@ def latent_trajectory_with_overlay(all_latent_vectors, real_trajectory, sample_l
     # Plot each latent dimension
     for dim in range(n_latent_dims):
         ax.plot(timesteps, mean_latent_trajectory[:, dim], 
-               label=f'Latent Dim {dim}', 
+               label=f'Latent Dim {dim}, z_0 = {mean_latent_trajectory[0, dim]/weights_sorted[dim]:.2f}, W = {weights_sorted[dim]:.2f}', 
                color=colors_list[dim], 
                linewidth=2, 
                alpha=0.8)
     ax.plot(timesteps, summed_output[0], label='Latent Dimensions Sum', color='green')
     plt.plot(plot_times, real_trajectory, label='Original Trajectory', color='orange', linestyle='--')
+    info_txt = (f"Sample {sample_index}\n"
+            f"Intensity: {parameters.dataset['y'][sample_index, 0].item():.2f}\n"
+            f"Voltage: {parameters.dataset['y'][sample_index, 1].item():.2f}\n"
+            f"Delay: {parameters.dataset['y'][sample_index, 2].item():.2f}\n")
+
+    # put a framed “sticky note” in the upper-right corner of the Axes
+    info_box = AnchoredText(
+        info_txt,
+        loc="upper right",          # other options: 'lower left', etc.
+        prop=dict(size=9),          # font size
+        frameon=True
+    )
+    info_box.patch.set_alpha(0.85)  # slight transparency looks nice
+    ax.add_artist(info_box) 
     # Formatting
     ax.set_xlabel('Timestep')
     ax.set_ylabel('Value')
     ax.set_title('Evolution of Latent Dimensions Over Time vs Original Trajectory')
     ax.grid(True, alpha=0.3)
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    
-    # Add info about sample selection
-    if sample_list is None:
-        sample_info = f"All samples (n={len(all_latent_vectors)})"
-    else:
-        sample_info = f"Selected samples (n={len(sample_list)})"
-    
-    ax.text(0.02, 0.98, sample_info, transform=ax.transAxes, 
-           verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
     
     plt.tight_layout()
     
@@ -1076,8 +1079,7 @@ def latent_trajectory_with_overlay(all_latent_vectors, real_trajectory, sample_l
         plt.show()
     
     print(f"Plotted {n_latent_dims} latent dimensions over {n_timesteps} timesteps")
-    if sample_list is not None:
-        print(f"Used samples: {sample_list}")
+    return mean_latent_trajectory[0]
 
 def latent_means_pairwise(
         latent_dim_idx,
@@ -1143,23 +1145,69 @@ def latent_means_pairwise(
             data_for_lines[y_val] = (x_keys, np.array(mean_vals))
         pairwise_means[(x_param, y_param)] = data_for_lines
 
-    # --------- plotting -----------------------------------------------------
+# --------- plotting -----------------------------------------------------
     if do_plot:
-        fig, axes = plt.subplots(2, 3, figsize=(18, 8), sharey='row')
-        axes = axes.ravel()
+        # ---------------------------------------------------------------
+        # 1.  Build per-parameter normalisers from *all* existing values
+        # ---------------------------------------------------------------
+        from matplotlib.colors import Normalize
+        param_unique_vals = {
+            p: np.array(sorted(mean_map_indices[p].keys()), dtype=float)
+            for p in params
+        }
+        norms = {p: Normalize(vmin=v.min(), vmax=v.max()) if len(v) else None
+                for p, v in param_unique_vals.items()}        # None ⇒ no data
 
-        for ax, ((x_param, y_param), line_dict) in zip(axes, pairwise_means.items()):
-            colours = cmap(np.linspace(0, 1, len(line_dict)))
-            for colour, (y_val, (xs, ys)) in zip(colours, line_dict.items()):
-                ax.plot(xs, ys, '-o', label=f'{y_param}={y_val}', color=colour)
+        base_cmap = plt.cm.get_cmap('RdBu_r')
+
+        # ---------------------------------------------------------------
+        # 2.  Keep only the panels that have data to show
+        # ---------------------------------------------------------------
+        valid_items = [
+            item for item in pairwise_means.items()    # ((x_param,y_param), line_dict)
+            if norms[item[0][1]] is not None           # y_param has data
+        ]
+
+        if not valid_items:                # nothing to draw at all
+            return pairwise_means
+
+        # grid size: 3 columns, enough rows for the remaining panels
+        n_panels = len(valid_items)
+        n_cols = 3
+        n_rows = -(-n_panels // n_cols)    # ceiling division
+
+        fig, axes = plt.subplots(n_rows, n_cols,
+                                figsize=(6*n_cols, 4*n_rows),
+                                sharey='row')
+        axes = np.atleast_1d(axes).ravel()   # flatten even if single row
+
+        # ---------------------------------------------------------------
+        # 3.  Draw each valid panel
+        # ---------------------------------------------------------------
+        for ax, ((x_param, y_param), line_dict) in zip(axes, valid_items):
+            norm = norms[y_param]
+
+            for y_val, (xs, ys) in line_dict.items():
+                colour = base_cmap(norm(float(y_val)))
+                ax.plot(xs, ys, '-o',
+                        label=f'{y_param}={y_val}', color=colour)
+
             ax.set_xlabel(x_param.capitalize())
             ax.set_ylabel(f'Latent z{latent_dim_idx}')
             ax.set_title(f'z{latent_dim_idx}: vs {x_param} (grouped by {y_param})')
             ax.legend(loc='best', fontsize='small')
+
             if x_param == 'delay':
                 ax.set_xscale('log')
 
+        # turn off any unused axes (if panels < rows*cols)
+        for ax in axes[n_panels:]:
+            ax.axis('off')
+
         plt.tight_layout()
+
+
+
 
     return pairwise_means
 
