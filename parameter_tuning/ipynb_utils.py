@@ -255,6 +255,12 @@ def sweep_latent_adaptive(
     ref = None
     mse_list = []
     
+    ##dodgy code
+    hardcoded_ldim = [0, 2, 1, 4, 3]
+    
+    
+    ## end dody code
+    
 
     fig, ax = plt.subplots(figsize=(7, 4))
     for i, vec in enumerate(sweep_vecs):
@@ -272,16 +278,16 @@ def sweep_latent_adaptive(
             if show_integrals:
                 integral = ipynb_utils.integrate_wrt_time(pred_times, pred_x_np[:, 0] / scale)
                 gradient = ipynb_utils.steepest_descending_gradient(pred_times, pred_x_np[:, 0] / scale)
-                label = f'z{latent_dim_number}, {mean_latent[latent_dim_number]+vec[latent_dim_number]:.3f}, ∫:{integral:.1f}, ∇:{gradient:.1f}'
+                label = f'z{hardcoded_ldim[latent_dim_number]}, {mean_latent[latent_dim_number]+vec[latent_dim_number]:.3f}, ∫:{integral:.1f}, ∇:{gradient:.1f}'
             else:
-                label = f'z{latent_dim_number}, {mean_latent[latent_dim_number]+vec[latent_dim_number]:.3f}'
+                label = f'z{hardcoded_ldim[latent_dim_number]}, {mean_latent[latent_dim_number]+vec[latent_dim_number]:.3f}'
         else:
             if show_integrals:
                 integral = ipynb_utils.integrate_wrt_time(pred_times, pred_x_np[:, 0] / scale)
                 gradient = ipynb_utils.steepest_descending_gradient(pred_times, pred_x_np[:, 0] / scale)
-                label = f'z{latent_dim_number}, {mean_latent[latent_dim_number]:.3f}+{vec[latent_dim_number]:.3f}, ∫:{integral:.1f}, ∇:{gradient:.1f}'
+                label = f'z{hardcoded_ldim[latent_dim_number]}, {mean_latent[latent_dim_number]:.3f}+{vec[latent_dim_number]:.3f}, ∫:{integral:.1f}, ∇:{gradient:.1f}'
             else:
-                label = f'z{latent_dim_number}, {mean_latent[latent_dim_number]:.3f}+{vec[latent_dim_number]:.3f}'
+                label = f'z{hardcoded_ldim[latent_dim_number]}, {mean_latent[latent_dim_number]:.3f}+{vec[latent_dim_number]:.3f}'
         ax.plot(pred_times, pred_x_np[:, 0] / scale, color=color, alpha=0.6, lw=2, label=label)
 
         if ref is None:
@@ -636,7 +642,7 @@ def latent_means_for_parameter(mean_map_indices, latent, do_plot=True):
     delay_means, delay_vals, delay_keys = _collect('delay')
 
     if do_plot:
-        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+        fig, axes = plt.subplots(3, 1, figsize=(4, 10))
         for i in range(inten_means.shape[0]):
             axes[0].plot(inten_vals[i], inten_means[i], '-o', label=f'z{i}')
             axes[1].plot(volt_vals[i],  volt_means[i],  '-o', label=f'z{i}')
